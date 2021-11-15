@@ -1,3 +1,110 @@
+# 1st part -Ingest data into a relational database from JSON files
+
+For this task, a script has been prepared in Python which reads from the source and pushes data into Postgres database.
+The highlevel flow of the script is as below:
+
+* The flow of the script is divided into multiple functions
+* As a first step, function "read_source_data" is called which reads from the source JSON
+* This function
+*   identifies the columns of data and seggregates metadata columns and actual data columns
+*   the details of column names and datatypes are extracted from the source data automatically
+*   prepares appropriate column lists to be used for table creation as well as data insertion
+*   the final dataframe with the required columns is prepared and returned along with column lists
+* Next, a database connection is established by calling a function. The database details are hard-coded in this function (in real time they can be read from a configration file). For this exercise, I have created a database "hexad" in my local postgres installation
+* Using the connection established, a new table "air_quality" is created in the database using the column list created in the first function
+* Passing the final dataframe and the table details the dataframe records are pushed into the database, all the statements are dynamically prepared based on the source data
+
+# 2nd part -Answer some questions using SQL
+
+1. Sum value of "Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard" per year
+
+#### Query
+
+`SELECT reportyear
+     , SUM(value) AS year_sum_value
+  FROM air_quality
+ WHERE measurename = 'Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard'
+ GROUP BY reportyear
+ ORDER BY reportyear::INTEGER;`
+ 
+ 2. Year with max value of "Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard" from year 2008 and later (inclusive)
+
+#### Query
+
+`WITH max_value AS (SELECT MAX(value) max_value
+                     FROM air_quality
+                    WHERE measurename = 'Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard'
+                      AND reportyear::INTEGER >= 2008
+                  )
+SELECT string_agg(reportyear,',') as years_with_max_value  --agg the year to cover the case of multiple years having max value
+  FROM air_quality,max_value
+ WHERE measurename = 'Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard'
+   AND reportyear::INTEGER >= 2008
+   AND value = max_value.max_value;`
+
+3. Max value of each measurement per state
+
+#### Query
+
+`SELECT statename,measurename,MAX(value)
+  FROM air_quality
+ GROUP BY statename,measurename
+ ORDER BY statename,measurename;`
+ 
+4. Average value of "Number of person-days with PM2.5 over the National Ambient Air Quality Standard (monitor and modeled data)" per year and state in ascending order
+
+#### Query
+
+`SELECT reportyear,statename,AVG(value) AS avg_value
+  FROM air_quality
+ WHERE measurename='Number of person-days with PM2.5 over the National Ambient Air Quality Standard (monitor and modeled data)'
+ GROUP BY reportyear,statename
+ ORDER BY AVG(value),reportyear::INTEGER,statename;`
+ 
+5. State with the max accumulated value of "Number of days with maximum 8-hour average ozone concentration
+over the National Ambient Air Quality Standard" overall years
+
+#### Query
+
+`WITH acc_value AS (SELECT statename,SUM(value) accumulated_value
+                     FROM air_quality
+                    WHERE measurename = 'Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard'
+                    GROUP BY statename
+                  )
+SELECT statename 
+  FROM (SELECT statename,RANK()over(ORDER BY accumulated_value DESC) AS value_rank
+          FROM acc_value) rnk
+ WHERE value_rank = 1;`
+
+6. Average value of "Number of person-days with maximum 8-hour average ozone concentration over the National
+Ambient Air Quality Standard" in the state of Florida
+
+#### Query
+
+`SELECT AVG(value)
+  FROM air_quality
+ WHERE measurename = 'Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard'
+   AND statename = 'Florida';`
+
+7. County with min "Number of days with maximum 8-hour average ozone concentration over the National Ambient
+Air Quality Standard" per state per year
+
+#### Query
+
+`WITH agg AS(SELECT reportyear::INTEGER,statename,countyname,SUM(value) AS sum_value
+              FROM air_quality
+             WHERE measurename = 'Number of days with maximum 8-hour average ozone concentration over the National Ambient Air Quality Standard'
+             GROUP BY reportyear,statename,countyname
+             ORDER BY reportyear::INTEGER,statename,countyname
+           )
+SELECT reportyear,statename,countyname
+  FROM (SELECT reportyear,statename,countyname,sum_value
+             , ROW_NUMBER() OVER (PARTITION BY reportyear,statename ORDER BY sum_value) AS rnk
+          FROM agg
+         ORDER BY reportyear,statename)a
+ WHERE rnk=1
+ ORDER BY reportyear,statename;`
+
 # Design Exercise
 
 ## Sources:
